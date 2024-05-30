@@ -12,6 +12,9 @@
  * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
  * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
+ * 
+ * Copyright (c) 2024 - Added binaural sound computation
+ * by Gia Minh Nguyen (Giaminhnguyen.2004@gmail.com) (u7556893@anu.edu.au)
  */
 
 #include <string.h> // for memcpy
@@ -22,7 +25,7 @@
 #endif
 #include "tinywav.h"
 #include <math.h>
-#include <unistd.h>
+#include <stdio.h>
 
 /** @returns true if the chunk of 4 characters matches the supplied string */
 static bool chunkIDMatches(char chunk[4], const char* chunkName)
@@ -399,9 +402,9 @@ bool tinywav_isOpen(TinyWav *tw) {
 
 #define NUM_CHANNELS 2
 #define SAMPLE_RATE 48000
-#define BLOCK_SIZE 1024
+#define BLOCK_SIZE 512
 #define FILTER_SIZE 256
-#define CONVOLVE_BLOCK_SIZE 1024
+#define CONVOLVE_BLOCK_SIZE 512
 
 void copy_array_f(float* dest, float* src, int dest_offset, int src_offset, int length) {
 	for(int i = 0; i < length; i++) {
@@ -418,29 +421,42 @@ void conv_32(float* filter, float* audio, float* output, uint32_t start, uint32_
   }
 }
 
-void binaural_compute(int degrees) {
+void binaural_compute_no_ptrs(int degrees, char* audio_file) {
 
 	// get snapped angle that is multiple of 30 degrees
 	int snap_seg = (int) round(((float) degrees) / 30);
 	int snap_deg = snap_seg * 30;
+  snap_deg = snap_deg % 360;
 
+  printf("snap_deg: %d, degrees: %d\r\n", snap_deg, degrees);
 	// convert degrees to char
-	char char_snap_deg[3] = "";
-	char char_degrees[3] = "";
+	
+  char char_snap_deg[8] = "";
+	char char_degrees[8] = "";
 	sprintf(char_snap_deg, "%d", snap_deg);
 	sprintf(char_degrees, "%d", degrees);
 
-	// build filter file path
-	char filter_path[64] = "dataset_bin_underscore/180_degrees.bin";
+  printf("snap_deg: %s, degrees: %s\r\n", char_snap_deg, char_degrees);
+  // build filter file path
+	char filter_path[64] = "";
+  strcat(filter_path, "dataset_bin/");
+	strcat(filter_path, char_snap_deg);
+	strcat(filter_path, "_");
+	strcat(filter_path, "degrees.bin");
 
 	// build output file path
-	char output_path[64] = "185_degrees.wav";
+	char output_path[64] = "";
+	strcat(output_path, "outputs/");
+	strcat(output_path, char_degrees);
+	strcat(output_path, "_");
+	strcat(output_path, "degrees_");
+	strcat(output_path, audio_file);
 
 	FILE* f_file;
 	uint32_t byteCheck;
 
-	printf("filter path: %s (%i)\r\n", filter_path);
-	printf("output path: %s (%i)\r\n", output_path);
+	printf("filter path: %s \r\n", filter_path);
+	printf("output path: %s \r\n", output_path);
 	// load filter's LR channels
 	f_file = fopen(filter_path, "rb");
 
@@ -454,7 +470,6 @@ void binaural_compute(int degrees) {
     printf("filter_l[%d]: %f, filter_r[%d]: %f\r\n", i, filter_l[i], i, filter_r[i]);
   }
 
-  sleep(10);
 	// setup for audio file comprehension and format
 	static TinyWav tw; // address to store read audio file
 	uint32_t sample_rate;
@@ -480,86 +495,165 @@ void binaural_compute(int degrees) {
 	    output_path // the output path
 	);
 
-	//static float cache_l[FILTER_SIZE - 1] = {0};
-	//static float cache_r[FILTER_SIZE - 1] = {0};
-//
-	//static float sample_l[CONVOLVE_BLOCK_SIZE + FILTER_SIZE - 1] = {0};
-	//static float sample_r[CONVOLVE_BLOCK_SIZE + FILTER_SIZE - 1] = {0};
-//
-	////static float sample_out_inline[CONVOLVE_BLOCK_SIZE * NUM_CHANNELS] = {0};
-//
-	//static float samples[2 * CONVOLVE_BLOCK_SIZE] = {0};
-	//static float out_l[CONVOLVE_BLOCK_SIZE + FILTER_SIZE - 1] = {0};
-	//static float out_r[CONVOLVE_BLOCK_SIZE + FILTER_SIZE - 1] = {0};
-//
-	//for (int i = 0; i < iteration; ++i) {
-	//	uint32_t input_seq_length = data_left < CONVOLVE_BLOCK_SIZE ? data_left : CONVOLVE_BLOCK_SIZE;
-	//	uint32_t sample_length;
-	//	if(i == 0) {
-	//		sample_length = input_seq_length;
-	//	} else {
-	//		sample_length = input_seq_length + FILTER_SIZE - 1;
-	//	}
-//
-	//	if(i == 0) {  // 1st iteration (edge case) as there are no data to prepend
-	//		tinywav_read_f(&tw, samples, input_seq_length);
-//
-	//		// split inline sample array
-	//		copy_array_f(sample_l, samples, 0, 0, input_seq_length);
-	//		copy_array_f(sample_r, samples, 0, input_seq_length, input_seq_length);
-//
-	//		// Cache the last n samples of the current block to pad to the next block
-	//		// so that convolution is continuous (where n = FILTER_SIZE - 1)
-	//		copy_array_f(cache_l, sample_l, 0, input_seq_length - FILTER_SIZE + 1, FILTER_SIZE - 1);
-	//		copy_array_f(cache_r, sample_r, 0, input_seq_length - FILTER_SIZE + 1, FILTER_SIZE - 1);
-	//		// Convolution: A:= filter, B:= input seq
-	//		// Convolution for Left channel
-	//		conv_32(filter_l, sample_l, out_l, 0, input_seq_length);
-	//		// Convolution for Right channel
-	//		conv_32(filter_r, sample_r, out_r, 0, input_seq_length);
-//
-	//		float* out_split[2] = {out_l, out_r};
-	//		tinywav_write_f(&tw_out, out_split, input_seq_length);
-//
-	//	} else {  // i > 0 => prepend data first and then convolve so convolution is continuous
-	//		//sample_length = input_seq_length + FILTER_SIZE - 1;
-	//		// load cache, prepend tail of last block into current block
-	//		copy_array_f(sample_l, cache_l, 0, 0, FILTER_SIZE - 1);
-	//		copy_array_f(sample_r, cache_r, 0, 0, FILTER_SIZE - 1);
-//
-	//		tinywav_read_f(&tw, samples, input_seq_length);
-//
-	//		// split inline sample array
-	//		copy_array_f(sample_l, samples, FILTER_SIZE - 1, 0, input_seq_length);
-	//		copy_array_f(sample_r, samples, FILTER_SIZE - 1, input_seq_length, input_seq_length);
-//
-  //    //for(int j = 0; j < sample_length; j++) {
-  //    //  printf("sample_l[%d]: %f, sample_r[%d]: %f\r\n", j, sample_l[j], j, sample_r[j]);
-  //    //}
-//
-	//		// Cache
-	//		copy_array_f(cache_l, sample_l, 0, sample_length - FILTER_SIZE + 1, FILTER_SIZE - 1);
-	//		copy_array_f(cache_r, sample_r, 0, sample_length - FILTER_SIZE + 1, FILTER_SIZE - 1);
-//
-	//		// Convolution: A:= filter, B:= input seq
-	//		// Convolution for Left channel
-  //    conv_32(filter_l, sample_l, out_l, FILTER_SIZE - 1, input_seq_length);
-  //    conv_32(filter_r, sample_r, out_r, FILTER_SIZE - 1, input_seq_length);
-//
-  //    //for(int j = 0; j < sample_length; j++) {
-  //    //  printf("%f \r\n", out_r[j]);
-  //    //}
-//
-  //    float* out_split[2] = {&out_l[255], &out_r[255]};
-	//		tinywav_write_f(&tw_out, out_split, input_seq_length);
-	//	}
-//
-	//	data_left -= input_seq_length;
-	//	// print to console every 10 rounds or end of loop
-	//	if(i % 10 == 0 || i == iteration - 1) {
-	//		printf("done convolution block: %d / %d (%i)\r\n", i, iteration - 1);
-	//	}
-	//}
+	static float cache_l[FILTER_SIZE - 1] = {0};
+	static float cache_r[FILTER_SIZE - 1] = {0};
+
+	static float sample_l[CONVOLVE_BLOCK_SIZE + FILTER_SIZE - 1] = {0};
+	static float sample_r[CONVOLVE_BLOCK_SIZE + FILTER_SIZE - 1] = {0};
+
+	//static float sample_out_inline[CONVOLVE_BLOCK_SIZE * NUM_CHANNELS] = {0};
+
+	static float samples[2 * CONVOLVE_BLOCK_SIZE] = {0};
+	static float out_l[CONVOLVE_BLOCK_SIZE + FILTER_SIZE - 1] = {0};
+	static float out_r[CONVOLVE_BLOCK_SIZE + FILTER_SIZE - 1] = {0};
+
+	for (int i = 0; i < iteration; ++i) {
+		uint32_t input_seq_length = data_left < CONVOLVE_BLOCK_SIZE ? data_left : CONVOLVE_BLOCK_SIZE;
+		uint32_t sample_length;
+		if(i == 0) {
+			sample_length = input_seq_length;
+		} else {
+			sample_length = input_seq_length + FILTER_SIZE - 1;
+		}
+
+		if(i == 0) {  // 1st iteration (edge case) as there are no data to prepend
+			tinywav_read_f(&tw, samples, input_seq_length);
+
+			// split inline sample array
+			copy_array_f(sample_l, samples, 0, 0, input_seq_length);
+			copy_array_f(sample_r, samples, 0, input_seq_length, input_seq_length);
+
+			// Cache the last n samples of the current block to pad to the next block
+			// so that convolution is continuous (where n = FILTER_SIZE - 1)
+			copy_array_f(cache_l, sample_l, 0, input_seq_length - FILTER_SIZE + 1, FILTER_SIZE - 1);
+			copy_array_f(cache_r, sample_r, 0, input_seq_length - FILTER_SIZE + 1, FILTER_SIZE - 1);
+			// Convolution: A:= filter, B:= input seq
+			// Convolution for Left channel
+			conv_32(filter_l, sample_l, out_l, 0, input_seq_length);
+			// Convolution for Right channel
+			conv_32(filter_r, sample_r, out_r, 0, input_seq_length);
+
+			float* out_split[2] = {out_l, out_r};
+			tinywav_write_f(&tw_out, out_split, input_seq_length);
+
+		} else {  // i > 0 => prepend data first and then convolve so convolution is continuous
+			//sample_length = input_seq_length + FILTER_SIZE - 1;
+			// load cache, prepend tail of last block into current block
+			copy_array_f(sample_l, cache_l, 0, 0, FILTER_SIZE - 1);
+			copy_array_f(sample_r, cache_r, 0, 0, FILTER_SIZE - 1);
+
+			tinywav_read_f(&tw, samples, input_seq_length);
+
+			// split inline sample array
+			copy_array_f(sample_l, samples, FILTER_SIZE - 1, 0, input_seq_length);
+			copy_array_f(sample_r, samples, FILTER_SIZE - 1, input_seq_length, input_seq_length);
+
+      //for(int j = 0; j < sample_length; j++) {
+      //  printf("sample_l[%d]: %f, sample_r[%d]: %f\r\n", j, sample_l[j], j, sample_r[j]);
+      //}
+
+			// Cache
+			copy_array_f(cache_l, sample_l, 0, sample_length - FILTER_SIZE + 1, FILTER_SIZE - 1);
+			copy_array_f(cache_r, sample_r, 0, sample_length - FILTER_SIZE + 1, FILTER_SIZE - 1);
+
+			// Convolution: A:= filter, B:= input seq
+			// Convolution for Left channel
+      conv_32(filter_l, sample_l, out_l, FILTER_SIZE - 1, input_seq_length);
+      conv_32(filter_r, sample_r, out_r, FILTER_SIZE - 1, input_seq_length);
+
+      //for(int j = 0; j < sample_length; j++) {
+      //  printf("%f \r\n", out_r[j]);
+      //}
+
+      float* out_split[2] = {&out_l[255], &out_r[255]};
+			tinywav_write_f(&tw_out, out_split, input_seq_length);
+		}
+
+		data_left -= input_seq_length;
+		// print to console every 10 rounds or end of loop
+		if(i % 10 == 0 || i == iteration - 1) {
+			printf("done convolution block: %d / %d (%i)\r\n", i, iteration - 1);
+		}
+	}
+
+	tinywav_close_write(&tw_out);
+	tinywav_close_read(&tw);
+}
+
+void binaural_compute(int degrees, char* audio_file) {
+
+	// get snapped angle that is multiple of 30 degrees
+	int snap_seg = (int) round(((float) degrees) / 30);
+	int snap_deg = snap_seg * 30;
+  snap_deg = snap_deg % 360;
+
+  printf("snap_deg: %d, degrees: %d\r\n", snap_deg, degrees);
+	// convert degrees to char
+	
+  char char_snap_deg[8] = "";
+	char char_degrees[8] = "";
+	sprintf(char_snap_deg, "%d", snap_deg);
+	sprintf(char_degrees, "%d", degrees);
+
+  printf("snap_deg: %s, degrees: %s\r\n", char_snap_deg, char_degrees);
+  // build filter file path
+	char filter_path[64] = "";
+  strcat(filter_path, "dataset_bin/");
+	strcat(filter_path, char_snap_deg);
+	strcat(filter_path, "_");
+	strcat(filter_path, "degrees.bin");
+
+	// build output file path
+	char output_path[64] = "";
+	strcat(output_path, "outputs/");
+	strcat(output_path, char_degrees);
+	strcat(output_path, "_");
+	strcat(output_path, "degrees_");
+	strcat(output_path, audio_file);
+
+	FILE* f_file;
+	uint32_t byteCheck;
+
+	printf("filter path: %s \r\n", filter_path);
+	printf("output path: %s \r\n", output_path);
+	// load filter's LR channels
+	f_file = fopen(filter_path, "rb");
+
+	static float filter_l[256];  // given filters have 256 samples each channel
+	static float filter_r[256];
+	fread(filter_l, 4, 256, f_file);
+	fread(filter_r, 4, 256, f_file);
+	fclose(f_file);
+
+  for(int i = 0; i < 256; i++) {
+    printf("filter_l[%d]: %f, filter_r[%d]: %f\r\n", i, filter_l[i], i, filter_r[i]);
+  }
+
+	// setup for audio file comprehension and format
+	static TinyWav tw; // address to store read audio file
+	uint32_t sample_rate;
+
+	// load audio file
+	int f_res = tinywav_open_read(&tw, audio_file, TW_SPLIT);
+
+	// get # of elements of data block per channel
+	uint32_t data_size = tw.h.Subchunk2Size / (sizeof(float));
+																				  // 8 = 4 * 2 (4 bytes/float * 2 channels
+	sample_rate = (uint32_t) tw.h.SampleRate;          // get audio's sample rate
+	uint32_t data_left = data_size;
+	uint32_t iteration = (uint32_t)ceil((float)data_size/CONVOLVE_BLOCK_SIZE);
+
+	// prepare output file
+	static TinyWav tw_out;
+	tinywav_open_write(&tw_out,
+	    2,
+	    sample_rate,
+	    TW_FLOAT32, // the output samples will be 32-bit floats. TW_INT16 is also supported
+	    TW_SPLIT,   // the samples to be written will be provided by an array of pointer
+								  // that points to different sub-arrays: [[L,L,L,L], [R,R,R,R]]
+	    output_path // the output path
+	);
+
 	// Prepare array to cache the tail of current samples to prepend to next convolving block
 	static float cache_last_samples[(NUM_CHANNELS * (FILTER_SIZE - 1))] = {0};
 	float* cache_ptrs[NUM_CHANNELS];
@@ -582,8 +676,8 @@ void binaural_compute(int degrees) {
 	// generate pointers to different channel section for both read and write
 	for (int j = 0; j < NUM_CHANNELS; ++j) {
 		cache_ptrs[j] = cache_last_samples + j * (FILTER_SIZE - 1);
-		sample_ptrs[j] = samples + j * (CONVOLVE_BLOCK_SIZE + (FILTER_SIZE));
-		sample_out_ptrs[j] = sample_out + j * (CONVOLVE_BLOCK_SIZE + (FILTER_SIZE));
+		sample_ptrs[j] = samples + j * (CONVOLVE_BLOCK_SIZE + (FILTER_SIZE - 1));
+		sample_out_ptrs[j] = sample_out + j * (CONVOLVE_BLOCK_SIZE + (FILTER_SIZE - 1));
 		sample_ptrs_offset[j] = sample_ptrs[j] + (FILTER_SIZE - 1);
 		sample_out_ptrs_offset[j] = sample_out_ptrs[j] + (FILTER_SIZE - 1);
 	}
@@ -606,12 +700,6 @@ void binaural_compute(int degrees) {
 			copy_array_f(cache_ptrs[1], sample_ptrs[1], 0, input_seq_length - FILTER_SIZE + 1, FILTER_SIZE - 1);
 			// Convolution: A:= filter, B:= input seq
 			// Convolution for Left channel
-			//arm_conv_partial_f32(filter_l, FILTER_SIZE, sample_ptrs[0], input_seq_length,
-			//										 sample_out_ptrs[0], 0, input_seq_length);
-			// Convolution for Right channel
-			//arm_conv_partial_f32(filter_r, FILTER_SIZE, sample_ptrs[1], input_seq_length,
-			//										 sample_out_ptrs[1], 0, input_seq_length);
-
       conv_32(filter_l, sample_ptrs[0], sample_out_ptrs[0], 0, input_seq_length);
 			// Convolution for Right channel
 			conv_32(filter_r, sample_ptrs[1], sample_out_ptrs[1], 0, input_seq_length);
@@ -633,12 +721,6 @@ void binaural_compute(int degrees) {
   
 			// Convolution: A:= filter, B:= input seq
 			// Convolution for Left channel
-			//arm_conv_partial_f32(filter_l, FILTER_SIZE, sample_ptrs[0], sample_length,
-			//										 sample_out_ptrs[0], FILTER_SIZE - 1, input_seq_length);
-			// Convolution for Right channel
-		  //arm_conv_partial_f32(filter_r, FILTER_SIZE, sample_ptrs[1], sample_length,
-			//										 sample_out_ptrs[1], FILTER_SIZE - 1, input_seq_length);
-
       conv_32(filter_l, sample_ptrs[0], sample_out_ptrs[0], FILTER_SIZE - 1, input_seq_length);
 			// Convolution for Right channel
 			conv_32(filter_r, sample_ptrs[1], sample_out_ptrs[1], FILTER_SIZE - 1, input_seq_length);
@@ -660,42 +742,5 @@ void binaural_compute(int degrees) {
 
 
 int main() {
-    binaural_compute(180);
-    //TinyWav tw;
-    //tinywav_open_read(&tw, 
-    //	"music.wav",
-    //	TW_SPLIT // the samples will be delivered by the read function in split format
-    //);
-//
-    //TinyWav tww;
-    //tinywav_open_write(&tww,
-    //    NUM_CHANNELS,
-    //    SAMPLE_RATE,
-    //    TW_FLOAT32, // the output samples will be 32-bit floats. TW_INT16 is also supported
-    //    TW_SPLIT,  // the samples to be written will be assumed to be inlined in a single buffer.
-    //                // Other options include TW_INTERLEAVED and TW_SPLIT
-    //    "output.wav" // the output path
-    //);
-//
-    //for (int i = 0; i < 500; i++) {
-    //  // samples are always provided in float32 format, 
-    //  // regardless of file sample format
-    //  float samples[NUM_CHANNELS * BLOCK_SIZE + 500];
-    //
-    //  // Split buffer requires pointers to channel buffers
-    //  float* samplePtrs[NUM_CHANNELS];
-    //  for (int j = 0; j < NUM_CHANNELS; ++j) {
-    //    samplePtrs[j] = samples + j*BLOCK_SIZE + 250;
-    //  }
-//
-    //  tinywav_read_f(&tw, samplePtrs, BLOCK_SIZE);
-//
-    //  tinywav_write_f(&tww, samplePtrs, BLOCK_SIZE);
-    //}
-//
-    //tinywav_close_read(&tw);
-//
-    //tinywav_close_write(&tww);
-
-
+  binaural_compute(150, "music.wav");
 }

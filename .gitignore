@@ -1,0 +1,8 @@
+dataset
+*.wav
+!C/music.wav
+!C/gunshot.wav
+!utils_python/gunshot.wav
+!utils_python/music.wav
+*.exe
+*.zip
